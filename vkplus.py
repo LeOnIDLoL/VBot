@@ -20,7 +20,7 @@ from vkapi import VkClient
 solver = None
 
 try:
-    from settings import CAPTCHA_KEY, CAPTCHA_SERVER, TOKEN, SCOPE, APP_ID
+    from settings import CAPTCHA_KEY, CAPTCHA_SERVER, TOKEN, SCOPE, APP_ID, GROUP_ID
 
     if CAPTCHA_KEY and CAPTCHA_KEY:
         solver = CaptchaSolver(CAPTCHA_SERVER, api_key=CAPTCHA_KEY)
@@ -172,6 +172,37 @@ class VkPlus(object):
                 link = result[k]
 
         return Attachment("photo", result["owner_id"], result["id"], "", link)
+
+    async def upload_doc(self, multipart_data) -> Attachment:
+        data = aiohttp.FormData()
+        data.add_field('file',
+                       multipart_data,
+                       filename='docs_picture.png',
+                       content_type='multipart/form-data')
+
+        # TODO отправ от пользователя, всё тоже самое но без параметра 'group_id', не тестил
+        if not GROUP_ID:
+            return None
+
+        upload_url = (await self.method('docs.getWallUploadServer', {'group_id': GROUP_ID}))['upload_url']
+
+        async with aiohttp.ClientSession() as sess:
+            async with sess.post(upload_url, data=data) as resp:
+                result = json.loads(await resp.text())
+
+        if not result:
+            return None
+
+        data = dict(file=result['file'])
+        result = (await self.method('docs.save', data))[0]
+
+        link = ""
+        # TODO сделано только для картинок, сюда добавить все нужные варианты ключей.
+        for k in result:
+            if "photo_" in k:
+                link = result[k]
+
+        return Attachment("doc", result["owner_id"], result["id"], "", link)
 
     @staticmethod
     def anti_flood():

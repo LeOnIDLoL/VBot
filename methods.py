@@ -12,7 +12,9 @@ ALLOWED_METHODS = {
                'setCallbackSettings'),
 
     'photos': ('getMessagesUploadServer',
-               'saveMessagesPhoto')
+               'saveMessagesPhoto'),
+    'docs':   ('getWallUploadServer',
+               'save')
 }
 # Словарь, ключ - раздел API методов, значение - список запрещённых методов
 DISALLOWED_MESSAGES = ('addChatUser',
