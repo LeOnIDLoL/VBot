@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>BULBARUST — Сервер Rust</title>
+	<meta name="description" content="BULBARUST — модифицированный сервер Rust с экономикой, телепортами, китами, событиями, кланами и автозащитой." />
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+	<style>
+		:root{
+			--bg:#0b0f14;--panel:#0e141b;--soft:#121924;--muted:#8aa0b2;--text:#e6f1ff;--accent:#4dd2ff;--accent2:#ff6b6b;--glass:rgba(255,255,255,.06);
+		}
+		*{box-sizing:border-box}
+		html,body{height:100%}
+		body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,'Helvetica Neue',Arial,'Noto Sans',sans-serif;background:radial-gradient(1200px 600px at 70% -20%,rgba(77,210,255,.15),transparent),radial-gradient(700px 400px at 10% 10%,rgba(255,107,107,.12),transparent),var(--bg);color:var(--text);}
+		a{color:inherit;text-decoration:none}
+		button{cursor:pointer}
+
+		/* Header */
+		header{position:sticky;top:0;z-index:20;background:linear-gradient(180deg,rgba(11,15,20,.85),rgba(11,15,20,.35));backdrop-filter:blur(8px);border-bottom:1px solid rgba(255,255,255,.06)}
+		.nav{max-width:1200px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;padding:14px 20px}
+		.brand{display:flex;align-items:center;gap:12px;font-weight:800;letter-spacing:.6px}
+		.brand-logo{width:34px;height:34px;border-radius:8px;background:linear-gradient(135deg,var(--accent),#59f3ff);box-shadow:0 0 30px rgba(77,210,255,.35)}
+		.nav-right{display:flex;gap:12px}
+		.btn{padding:10px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.03);color:var(--text);transition:.25s}
+		.btn:hover{transform:translateY(-1px);border-color:rgba(255,255,255,.2)}
+		.btn-accent{background:linear-gradient(135deg,var(--accent),#59f3ff);color:#001014;border:none;box-shadow:0 10px 24px rgba(77,210,255,.25)}
+
+		/* Hero */
+		.hero{position:relative;overflow:hidden}
+		.hero-wrap{max-width:1200px;margin:0 auto;display:grid;grid-template-columns:1.1fr .9fr;align-items:center;gap:32px;padding:70px 20px}
+		.h-title{font-size:46px;line-height:1.05;margin:0 0 10px}
+		.h-sub{color:var(--muted);font-size:16px;max-width:640px}
+		.cta{display:flex;gap:12px;margin-top:18px}
+		.tag{display:inline-flex;align-items:center;gap:8px;background:rgba(77,210,255,.12);color:#bfefff;border:1px solid rgba(77,210,255,.35);padding:6px 10px;border-radius:999px;font-size:12px;margin-bottom:12px}
+		.card{background:var(--panel);border:1px solid rgba(255,255,255,.06);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+		.card.pad{padding:18px}
+
+		/* Features grid */
+		.features{max-width:1200px;margin:0 auto;padding:10px 20px 40px;display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+		.feature{padding:16px;border-radius:14px;border:1px solid rgba(255,255,255,.06);background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.01))}
+		.feature h4{margin:0 0 6px}
+		.feature p{margin:0;color:var(--muted);font-size:14px}
+
+		/* Junkyard Crane Section */
+		.section{max-width:1200px;margin:0 auto;padding:40px 20px;display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:center}
+		.section h3{font-size:28px;margin:0 0 10px}
+		.section p{color:var(--muted);margin:0 0 8px}
+		.bullet{display:flex;align-items:flex-start;gap:10px;color:var(--muted);font-size:14px}
+		.bullet::before{content:"";margin-top:7px;display:inline-block;width:8px;height:8px;border-radius:50%;background:linear-gradient(135deg,var(--accent),#59f3ff);box-shadow:0 0 16px rgba(77,210,255,.45)}
+		.crane-wrap{position:relative;height:420px;display:flex;align-items:center;justify-content:center}
+		.crane{max-width:520px;max-height:420px;filter:drop-shadow(0 28px 60px rgba(0,0,0,.55));animation:floatY 6s ease-in-out infinite}
+		@keyframes floatY{0%{transform:translateY(0) rotate(-.2deg)}50%{transform:translateY(-10px) rotate(.2deg)}100%{transform:translateY(0) rotate(-.2deg)}}
+		.spark{position:absolute;width:8px;height:8px;border-radius:50%;background:radial-gradient(circle at 30% 30%,#fff,rgba(255,255,255,.6) 40%,transparent 70%);animation:blink 2.2s infinite}
+		.spark.s1{left:20%;top:18%}
+		.spark.s2{left:65%;top:30%}
+		.spark.s3{left:78%;top:70%}
+		@keyframes blink{0%,100%{opacity:.2;transform:scale(.8)}50%{opacity:1;transform:scale(1.15)}}
+
+		/* Server panel */
+		.server{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+		.kv{display:flex;align-items:center;justify-content:space-between;padding:12px;border-radius:12px;border:1px solid rgba(255,255,255,.06);background:var(--soft)}
+		.kv small{color:var(--muted)}
+		.copy{padding:8px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.04)}
+		.status{display:flex;align-items:center;gap:8px}
+		.dot{width:10px;height:10px;border-radius:50%;background:#aaa;box-shadow:0 0 10px rgba(255,255,255,.2)}
+		.dot.on{background:#33e04f;box-shadow:0 0 16px rgba(51,224,79,.65)}
+		.dot.off{background:#ff6b6b;box-shadow:0 0 16px rgba(255,107,107,.55)}
+		.progress{height:8px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}
+		.progress > i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),#59f3ff);box-shadow:0 0 14px rgba(77,210,255,.45);transition:width .6s ease}
+
+		/* Footer */
+		footer{max-width:1200px;margin:0 auto;padding:30px 20px;color:var(--muted);border-top:1px solid rgba(255,255,255,.06)}
+
+		/* Responsive */
+		@media (max-width:1024px){.hero-wrap{grid-template-columns:1fr;}.features{grid-template-columns:1fr 1fr}.section{grid-template-columns:1fr}.crane{max-width:80%}}
+		@media (max-width:640px){.features{grid-template-columns:1fr}.h-title{font-size:34px}}
+	</style>
+</head>
+<body>
+	header>
+		<div class="nav">
+			<div class="brand"><div class="brand-logo"></div> BULBARUST</div>
+			<div class="nav-right">
+				<a class="btn" href="#features">Возможности</a>
+				<a class="btn" href="#crane">Кран на свалке</a>
+				<a class="btn btn-accent" href="#connect">Подключиться</a>
+			</div>
+		</div>
+	</header>
+
+	<section class="hero">
+		<div class="hero-wrap">
+			<div>
+				<div class="tag">Официальные плагины • uMod • Экономика • PvE/PvP</div>
+				<h1 class="h-title">BULBARUST — твой опыт в Rust на новом уровне</h1>
+				<p class="h-sub">Экономика, магазин, телепорты, кланы, события, продвинутая автозащита от рейда, красивый интерфейс. Всё работает вместе, стабильно и быстро. Добро пожаловать!</p>
+				<div class="cta">
+					<a class="btn btn-accent" href="#connect">Играть сейчас</a>
+					<a class="btn" href="#crane">Уникальные механики</a>
+				</div>
+			</div>
+			<div class="card pad">
+				<div class="server" id="connect">
+					<div class="kv"><small>IP сервера</small><div><code id="ip">127.0.0.1:28015</code> <button class="copy" id="copy">Копировать</button></div></div>
+					<div class="kv"><small>Статус</small><div class="status"><span class="dot" id="dot"></span><span id="stat">Проверяем...</span></div></div>
+					<div class="kv" style="grid-column:1/3">
+						<small>Онлайн</small>
+						<div style="flex:1;margin:0 10px" class="progress"><i id="pbar"></i></div>
+						<small id="online">0/50</small>
+					</div>
+				</div>
+			</div>
+		</div>
+	</section>
+
+	<section id="features" class="features">
+		<div class="feature">
+			<h4>Экономика и Магазин</h4>
+			<p>Валюта, ежедневные награды, аукционы, банк. Баланс между PvE и PvP.</p>
+		</div>
+		<div class="feature">
+			<h4>Телепорты</h4>
+			<p>Дом, /tpa, случайные телепорты, /back. Кулдауны и защита от абуза.</p>
+		</div>
+		<div class="feature">
+			<h4>Кланы и События</h4>
+			<p>Система рангов и войн, автоматические и ручные эвенты с наградами.</p>
+		</div>
+		<div class="feature">
+			<h4>Автозащита</h4>
+			<p>Умная противорайдовая система, уведомления, лимиты и таймеры.</p>
+		</div>
+		<div class="feature">
+			<h4>UI интерфейс</h4>
+			<p>Единое меню со вкладками, анимации и прогресс-бары кулдаунов.</p>
+		</div>
+		<div class="feature">
+			<h4>Стабильность</h4>
+			<p>Оптимизация, авто-резервные копии, регулярные обновления сервера.</p>
+		</div>
+	</section>
+
+	<section id="crane" class="section">
+		<div>
+			<h3>Уникальная механика: Кран на свалке</h3>
+			<p>На свалке ты найдёшь промышленный кран. Он позволяет поднимать тяжёлые объекты и контейнеры с лутом. Управляй аккуратно — карма и репутация учитывают твои действия, а защита базы противодействует грабежам.</p>
+			<div class="bullet">Поднимай контейнеры с редким лутом, доставляй на базу безопасным маршрутом.</div>
+			<div class="bullet">Соревнуйся за контроль крана — клановая тактика решает исход.</div>
+			<div class="bullet">Особые ивенты: в определённое время кран активирует бонус-добычу.</div>
+			<div class="bullet">Интеграция с экономикой: сдавай содержимое на аукцион или в банк.</div>
+		</div>
+		<div class="crane-wrap card">
+			<img class="crane" src="https://pngimg.com/uploads/crane/crane_PNG5420.png" alt="Crane transparent" />
+			<i class="spark s1"></i><i class="spark s2"></i><i class="spark s3"></i>
+		</div>
+	</section>
+
+	<footer>
+		<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+			<div>© <span id="year"></span> BULBARUST. Неофициальный сервер игры Rust.</div>
+			<div style="display:flex;gap:10px">
+				<a class="btn" href="#connect">Подключение</a>
+				<a class="btn" href="#features">Возможности</a>
+				<a class="btn" href="#crane">Кран</a>
+			</div>
+		</div>
+	</footer>
+
+	<script>
+		const ipEl = document.getElementById('ip');
+		const copyBtn = document.getElementById('copy');
+		const dot = document.getElementById('dot');
+		const stat = document.getElementById('stat');
+		const pbar = document.getElementById('pbar');
+		const onlineEl = document.getElementById('online');
+		document.getElementById('year').textContent = new Date().getFullYear();
+
+		copyBtn.addEventListener('click', async () => {
+			try {
+				await navigator.clipboard.writeText(ipEl.textContent.trim());
+				copyBtn.textContent = 'Скопировано';
+				setTimeout(() => copyBtn.textContent = 'Копировать', 1400);
+			} catch(e) {
+				alert('Скопируйте вручную: ' + ipEl.textContent.trim());
+			}
+		});
+
+		// Demo status logic (mock). Replace fetch URL with your real status endpoint if you add one.
+		async function refreshStatus(){
+			try{
+				// Example: const r = await fetch('/api/status'); const data = await r.json();
+				// Mock data for demo:
+				const data = { online:true, players: Math.floor(Math.random()*30)+10, max:50 };
+				dot.classList.remove('off'); dot.classList.add('on');
+				stat.textContent = 'Онлайн';
+				const frac = Math.min(1, data.players / data.max);
+				pbar.style.width = (frac*100).toFixed(0) + '%';
+				onlineEl.textContent = data.players + '/' + data.max;
+			}catch(e){
+				dot.classList.remove('on'); dot.classList.add('off');
+				stat.textContent = 'Оффлайн';
+				pbar.style.width = '0%';
+				onlineEl.textContent = '0/50';
+			}
+		}
+		refreshStatus();
+		setInterval(refreshStatus, 5000);
+	</script>
+</body>
+</html>
