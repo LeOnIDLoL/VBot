@@ -8,8 +8,8 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-	[Info("Bulba UI", "BULBARUST", "1.0.0")]
-	[Description("Единый графический интерфейс (CUI) для BULBARUST: экономика, телепорт, киты, события, кланы, админ")] 
+	[Info("Bulba UI", "BULBARUST", "1.1.0")]
+	[Description("Единый графический интерфейс (CUI) для BULBARUST: экономика, телепорт, киты, события, кланы, админ, прогресс-бары и анимации")] 
 	public class BulbaUI : RustPlugin
 	{
 		[PluginReference] private Plugin ImageLibrary;
@@ -35,13 +35,10 @@ namespace Oxide.Plugins
 			{ Tab.Admin, "Админ" }
 		};
 
-		// Image keys and URLs (real, no placeholders). These are CC0/royalty-free general textures suitable for UI backdrops/icons.
-		// You can replace with your branding any time.
+		// Image keys and URLs (real, no placeholders)
 		private class Img
 		{
-			public string Key;
-			public string Url;
-			public Img(string key, string url) { Key = key; Url = url; }
+			public string Key; public string Url; public Img(string key, string url) { Key = key; Url = url; }
 		}
 
 		private readonly List<Img> Images = new List<Img>
@@ -59,6 +56,22 @@ namespace Oxide.Plugins
 
 		// Per-player selected tab
 		private readonly Dictionary<ulong, Tab> playerTab = new Dictionary<ulong, Tab>();
+		// Track who has UI open (for refresh)
+		private readonly HashSet<ulong> uiOpen = new HashSet<ulong>();
+
+		// Cooldown/progress tracking (API-accessible)
+		private class Cooldown
+		{
+			public string Key;          // e.g., "home", "tpa"
+			public string Title;        // visible title
+			public float EndTime;       // Time.realtimeSinceStartup when ends
+			public float Total;         // total seconds
+		}
+		// playerId -> key -> cooldown
+		private readonly Dictionary<ulong, Dictionary<string, Cooldown>> playerCooldowns = new Dictionary<ulong, Dictionary<string, Cooldown>>();
+
+		private float refreshInterval = 0.5f; // seconds
+		private Timer refreshTimer;
 
 		#region Oxide Hooks
 		void Init()
@@ -70,19 +83,27 @@ namespace Oxide.Plugins
 		void OnServerInitialized()
 		{
 			EnsureImagesLoaded();
+			refreshTimer = timer.Every(refreshInterval, RefreshLoop);
+		}
+
+		void Unload()
+		{
+			if (refreshTimer != null && !refreshTimer.Destroyed) refreshTimer.Destroy();
+			foreach (var player in BasePlayer.activePlayerList) DestroyUI(player);
 		}
 
 		void OnPlayerConnected(BasePlayer player)
 		{
 			if (!HasUse(player)) return;
-			// Auto-open can be toggled; enabled by default for UX
 			Show(player);
 		}
 
 		void OnPlayerDisconnected(BasePlayer player, string reason)
 		{
 			DestroyUI(player);
-			if (playerTab.ContainsKey(player.userID)) playerTab.Remove(player.userID);
+			uiOpen.Remove(player.userID);
+			playerTab.Remove(player.userID);
+			playerCooldowns.Remove(player.userID);
 		}
 		#endregion
 
@@ -98,6 +119,7 @@ namespace Oxide.Plugins
 		private void CmdClose(BasePlayer player, string command, string[] args)
 		{
 			DestroyUI(player);
+			uiOpen.Remove(player.userID);
 		}
 
 		[ConsoleCommand("bulbaui.tab")]
@@ -123,10 +145,44 @@ namespace Oxide.Plugins
 		}
 		#endregion
 
+		#region Public API (for other plugins)
+		// Set or update a cooldown (remaining seconds of total)
+		// Call("SetPlayerCooldown", playerId, key, title, remainingSeconds, totalSeconds)
+		object SetPlayerCooldown(ulong playerId, string key, string title, float remaining, float total)
+		{
+			if (!playerCooldowns.ContainsKey(playerId)) playerCooldowns[playerId] = new Dictionary<string, Cooldown>();
+			playerCooldowns[playerId][key] = new Cooldown
+			{
+				Key = key,
+				Title = title,
+				EndTime = Time.realtimeSinceStartup + Mathf.Max(0f, remaining),
+				Total = Mathf.Max(0.01f, total)
+			};
+			return true;
+		}
+
+		// Clear a specific cooldown
+		// Call("ClearPlayerCooldown", playerId, key)
+		object ClearPlayerCooldown(ulong playerId, string key)
+		{
+			if (playerCooldowns.ContainsKey(playerId)) playerCooldowns[playerId].Remove(key);
+			return true;
+		}
+
+		// Clear all cooldowns
+		// Call("ClearAllCooldowns", playerId)
+		object ClearAllCooldowns(ulong playerId)
+		{
+			playerCooldowns.Remove(playerId);
+			return true;
+		}
+		#endregion
+
 		#region UI
 		private void Show(BasePlayer player)
 		{
 			if (!playerTab.ContainsKey(player.userID)) playerTab[player.userID] = Tab.Economy;
+			uiOpen.Add(player.userID);
 			Render(player);
 		}
 
@@ -151,8 +207,8 @@ namespace Oxide.Plugins
 				RectTransform = { AnchorMin = "0.2 0.15", AnchorMax = "0.8 0.85" }
 			}, UI_ROOT, UI_MAIN);
 
-			// Background image
-			AddRawImage(elements, UI_MAIN, GetImageId("bg.panel"), "0 0", "1 1", 0.15f);
+			// Background image with gentle fade
+			AddRawImage(elements, UI_MAIN, GetImageId("bg.panel"), "0 0", "1 1", 0.20f);
 
 			// Top strip with logo
 			var top = elements.Add(new CuiPanel
@@ -160,8 +216,8 @@ namespace Oxide.Plugins
 				Image = { Color = "0 0 0 0.6" },
 				RectTransform = { AnchorMin = "0 0.92", AnchorMax = "1 1" }
 			}, UI_MAIN);
-			AddRawImage(elements, top, GetImageId("bg.strip"), "0 0", "1 1", 0.25f);
-			AddRawImage(elements, top, GetImageId("logo"), "0.01 0.05", "0.06 0.95", 1f);
+			AddRawImage(elements, top, GetImageId("bg.strip"), "0 0", "1 1", 0.3f);
+			AddRawImage(elements, top, GetImageId("logo"), "0.01 0.05", "0.06 0.95", 0.8f);
 
 			// Title
 			elements.Add(new CuiLabel
@@ -223,13 +279,23 @@ namespace Oxide.Plugins
 					Tab.Admin => "icon.admin",
 					_ => "icon.events"
 				};
-				AddRawImage(elements, panel, GetImageId(iconKey), "0.02 0.15", "0.18 0.85", 1f);
+				AddRawImage(elements, panel, GetImageId(iconKey), "0.02 0.15", "0.18 0.85", 0.9f);
 
 				elements.Add(new CuiLabel
 				{
 					Text = { Text = TabTitles[tab], FontSize = 14, Align = TextAnchor.MiddleLeft, Color = "1 1 1 1" },
 					RectTransform = { AnchorMin = "0.2 0.1", AnchorMax = "0.98 0.9" }
 				}, panel);
+
+				// active underline animation (thin bar)
+				if (active)
+				{
+					elements.Add(new CuiPanel
+					{
+						Image = { Color = "0.9 0.9 0.9 1" },
+						RectTransform = { AnchorMin = "0.02 0.02", AnchorMax = "0.98 0.06" }
+					}, panel);
+				}
 
 				// click
 				elements.Add(new CuiButton
@@ -248,19 +314,19 @@ namespace Oxide.Plugins
 			switch (tab)
 			{
 				case Tab.Economy:
-					ContentEconomy(elements, UI_CONTENT);
+					ContentEconomy(elements, UI_CONTENT, player);
 					break;
 				case Tab.Teleport:
-					ContentTeleport(elements, UI_CONTENT);
+					ContentTeleport(elements, UI_CONTENT, player);
 					break;
 				case Tab.Kits:
-					ContentKits(elements, UI_CONTENT);
+					ContentKits(elements, UI_CONTENT, player);
 					break;
 				case Tab.Events:
-					ContentEvents(elements, UI_CONTENT);
+					ContentEvents(elements, UI_CONTENT, player);
 					break;
 				case Tab.Clans:
-					ContentClans(elements, UI_CONTENT);
+					ContentClans(elements, UI_CONTENT, player);
 					break;
 				case Tab.Admin:
 					ContentAdmin(elements, UI_CONTENT, player);
@@ -268,9 +334,12 @@ namespace Oxide.Plugins
 			}
 		}
 
-		private void ContentEconomy(CuiElementContainer e, string parent)
+		private void ContentEconomy(CuiElementContainer e, string parent, BasePlayer player)
 		{
 			AddSectionTitle(e, parent, "Экономика");
+			// Progress bars (examples): balance growth (visual), daily reward cooldown if provided via API
+			DrawCooldownBars(e, parent, player.userID, new[] { "daily", "auction", "bank" }, 0.86f);
+
 			AddGridButtons(e, parent, new[]
 			{
 				Btn("Баланс", "balance"),
@@ -282,9 +351,11 @@ namespace Oxide.Plugins
 			});
 		}
 
-		private void ContentTeleport(CuiElementContainer e, string parent)
+		private void ContentTeleport(CuiElementContainer e, string parent, BasePlayer player)
 		{
 			AddSectionTitle(e, parent, "Телепорт");
+			DrawCooldownBars(e, parent, player.userID, new[] { "home", "tpa", "random", "back" }, 0.86f);
+
 			AddGridButtons(e, parent, new[]
 			{
 				Btn("Дом - список", "home list"),
@@ -296,9 +367,11 @@ namespace Oxide.Plugins
 			});
 		}
 
-		private void ContentKits(CuiElementContainer e, string parent)
+		private void ContentKits(CuiElementContainer e, string parent, BasePlayer player)
 		{
 			AddSectionTitle(e, parent, "Киты");
+			DrawCooldownBars(e, parent, player.userID, new[] { "kit", "dailykit", "votekit" }, 0.86f);
+
 			AddGridButtons(e, parent, new[]
 			{
 				Btn("Доступные киты", "kit"),
@@ -307,18 +380,22 @@ namespace Oxide.Plugins
 			});
 		}
 
-		private void ContentEvents(CuiElementContainer e, string parent)
+		private void ContentEvents(CuiElementContainer e, string parent, BasePlayer player)
 		{
 			AddSectionTitle(e, parent, "События");
+			DrawCooldownBars(e, parent, player.userID, new[] { "event" }, 0.86f);
+
 			AddGridButtons(e, parent, new[]
 			{
 				Btn("Список событий", "event list")
 			});
 		}
 
-		private void ContentClans(CuiElementContainer e, string parent)
+		private void ContentClans(CuiElementContainer e, string parent, BasePlayer player)
 		{
 			AddSectionTitle(e, parent, "Кланы");
+			DrawCooldownBars(e, parent, player.userID, new[] { "clanwar" }, 0.86f);
+
 			AddGridButtons(e, parent, new[]
 			{
 				Btn("Инфо", "clan info"),
@@ -331,6 +408,8 @@ namespace Oxide.Plugins
 		private void ContentAdmin(CuiElementContainer e, string parent, BasePlayer player)
 		{
 			AddSectionTitle(e, parent, "Админ");
+			AddInfoBar(e, parent, "Подсказка", "Используйте эти кнопки ответственно. Рекомендуется перед изменениями делать бэкап.", 0.88f, "0.15 0.15 0.15 0.8");
+
 			AddGridButtons(e, parent, new[]
 			{
 				Btn("Сохранить мир", "server.save"),
@@ -350,10 +429,24 @@ namespace Oxide.Plugins
 			}, parent);
 		}
 
+		private void AddInfoBar(CuiElementContainer e, string parent, string title, string text, float topY, string color)
+		{
+			var panel = e.Add(new CuiPanel
+			{
+				Image = { Color = color },
+				RectTransform = { AnchorMin = $"0.02 {topY}", AnchorMax = "0.98 0.94" }
+			}, parent);
+			e.Add(new CuiLabel
+			{
+				Text = { Text = $"{title}: {text}", FontSize = 12, Align = TextAnchor.MiddleLeft, Color = "1 1 1 0.95" },
+				RectTransform = { AnchorMin = "0.02 0", AnchorMax = "0.98 1" }
+			}, panel);
+		}
+
 		private void AddGridButtons(CuiElementContainer e, string parent, IEnumerable<(string label, string cmd)> items)
 		{
 			// Grid 3xN
-			float startY = 0.86f;
+			float startY = 0.80f;
 			float rowH = 0.12f;
 			int idx = 0;
 			foreach (var item in items)
@@ -379,13 +472,63 @@ namespace Oxide.Plugins
 
 				e.Add(new CuiButton
 				{
-					Button = { Command = $"bulbaui.exec {Escape(item.cmd)}", Color = "0 0 0 0" },
-					RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-					Text = { Text = "" }
+					Button = { Command = $"bulbaui.exec {Escape(item.cmd)}", Color = "0.2 0.6 0.9 1" },
+					RectTransform = { AnchorMin = "0.05 0.15", AnchorMax = "0.95 0.85" },
+					Text = { Text = "Выполнить", FontSize = 12, Align = TextAnchor.MiddleCenter, Color = "1 1 1 1" }
 				}, panel);
 
 				idx++;
 			}
+		}
+
+		private void DrawCooldownBars(CuiElementContainer e, string parent, ulong playerId, IEnumerable<string> keys, float topStart)
+		{
+			if (!playerCooldowns.ContainsKey(playerId)) return;
+			var dict = playerCooldowns[playerId];
+			float y = topStart;
+			foreach (var key in keys)
+			{
+				if (!dict.ContainsKey(key)) continue;
+				var cd = dict[key];
+				float remain = Mathf.Max(0f, cd.EndTime - Time.realtimeSinceStartup);
+				float frac = Mathf.Clamp01(1f - (remain / Mathf.Max(0.01f, cd.Total)));
+				AddProgressBar(e, parent, cd.Title, remain, cd.Total, frac, y);
+				y -= 0.06f; // next line
+				if (y < 0.70f) break; // keep area tidy
+			}
+		}
+
+		private void AddProgressBar(CuiElementContainer e, string parent, string title, float remain, float total, float fraction, float topY)
+		{
+			// Container
+			var row = e.Add(new CuiPanel
+			{
+				Image = { Color = "0 0 0 0.35" },
+				RectTransform = { AnchorMin = $"0.02 {topY - 0.04}", AnchorMax = $"0.98 {topY}" }
+			}, parent);
+
+			// Label
+			e.Add(new CuiLabel
+			{
+				Text = { Text = $"{title} — {Mathf.CeilToInt(remain)}с", FontSize = 12, Align = TextAnchor.MiddleLeft, Color = "1 1 1 0.95" },
+				RectTransform = { AnchorMin = "0.02 0.1", AnchorMax = "0.35 0.9" }
+			}, row);
+
+			// Bar background
+			var barBg = e.Add(new CuiPanel
+			{
+				Image = { Color = "0.1 0.1 0.1 0.9" },
+				RectTransform = { AnchorMin = "0.36 0.2", AnchorMax = "0.98 0.8" }
+			}, row);
+
+			// Bar fill with slight fade
+			var fillMin = 0.36f;
+			var fillMax = 0.36f + (0.62f * Mathf.Clamp01(fraction));
+			e.Add(new CuiPanel
+			{
+				Image = { Color = "0.2 0.7 0.3 1" },
+				RectTransform = { AnchorMin = $"{fillMin} 0.2", AnchorMax = $"{fillMax} 0.8" }
+			}, row);
 		}
 
 		private string Escape(string s)
@@ -442,7 +585,6 @@ namespace Oxide.Plugins
 
 		private string GetImageId(string key)
 		{
-			// We map keys to URLs above
 			var map = Images.ToDictionary(i => i.Key, i => i.Url);
 			if (!map.ContainsKey(key) || ImageLibrary == null) return null;
 			var url = map[key];
@@ -460,6 +602,25 @@ namespace Oxide.Plugins
 		private bool HasAdmin(BasePlayer player)
 		{
 			return player.IsAdmin || permission.UserHasPermission(player.UserIDString, PermissionAdmin);
+		}
+
+		private void RefreshLoop()
+		{
+			if (uiOpen.Count == 0) return;
+			foreach (var player in BasePlayer.activePlayerList)
+			{
+				if (!uiOpen.Contains(player.userID)) continue;
+				// Re-render only content area to animate progress bars without rebuilding whole UI
+				CuiHelper.DestroyUi(player, UI_CONTENT);
+				var c = new CuiElementContainer();
+				c.Add(new CuiPanel
+				{
+					Image = { Color = "0 0 0 0.35" },
+					RectTransform = { AnchorMin = "0.015 0.02", AnchorMax = "0.985 0.85" }
+				}, UI_MAIN, UI_CONTENT);
+				BuildContent(c, player, playerTab.ContainsKey(player.userID) ? playerTab[player.userID] : Tab.Economy);
+				CuiHelper.AddUi(player, c);
+			}
 		}
 		#endregion
 	}
