@@ -120,6 +120,19 @@ namespace Oxide.Plugins
         void OnServerInitialized()
         {
             LoadData();
+            if (config.EnableTeleport)
+            {
+                timer.Every(1f, ProcessTeleportationCooldowns);
+            }
+        }
+
+        void OnPlayerConnected(BasePlayer player)
+        {
+            if (config.EnableTeleport)
+            {
+                InitializePlayerTeleportation(player);
+                CheckPlayerTeleportationStatus(player);
+            }
         }
 
         void OnPlayerDisconnected(BasePlayer player, string reason)
@@ -135,6 +148,27 @@ namespace Oxide.Plugins
             {
                 teleportingPlayers.Remove(player.userID);
             }
+            
+            SavePlayerTeleportationData(player.userID);
+        }
+
+        void OnEntityTakeDamage(BaseCombatEntity entity, HitInfo info)
+        {
+            if (!config.EnableTeleport) return;
+
+            var player = entity as BasePlayer;
+            if (player == null) return;
+
+            // Отменяем телепортацию при получении урона
+            CancelTeleportation(player);
+        }
+
+        void OnPlayerAttack(BasePlayer attacker, HitInfo info)
+        {
+            if (!config.EnableTeleport) return;
+
+            // Отменяем телепортацию при атаке
+            CancelTeleportation(attacker);
         }
         #endregion
 
@@ -147,6 +181,58 @@ namespace Oxide.Plugins
         private void SaveData()
         {
             Interface.Oxide.DataFileSystem.WriteObject("teleport_homes", playerHomes);
+        }
+
+        private void SavePlayerTeleportationData(ulong playerId)
+        {
+            if (playerHomes.ContainsKey(playerId))
+            {
+                Interface.Oxide.DataFileSystem.WriteObject($"teleport_homes_{playerId}", playerHomes[playerId]);
+            }
+        }
+
+        private void InitializePlayerTeleportation(BasePlayer player)
+        {
+            if (!playerHomes.ContainsKey(player.userID))
+            {
+                playerHomes[player.userID] = new List<HomeLocation>();
+            }
+        }
+
+        private void CheckPlayerTeleportationStatus(BasePlayer player)
+        {
+            if (!playerHomes.ContainsKey(player.userID)) return;
+
+            var homes = playerHomes[player.userID];
+            player.ChatMessage($"<color=yellow>Дома: {homes.Count}/{config.MaxHomes}</color>");
+        }
+
+        private void ProcessTeleportationCooldowns()
+        {
+            var currentTime = Time.time;
+            var playersToRemove = new List<ulong>();
+
+            foreach (var playerId in teleportingPlayers.Keys.ToList())
+            {
+                if (currentTime >= teleportingPlayers[playerId])
+                {
+                    playersToRemove.Add(playerId);
+                }
+            }
+
+            foreach (var playerId in playersToRemove)
+            {
+                teleportingPlayers.Remove(playerId);
+            }
+        }
+
+        private void CancelTeleportation(BasePlayer player)
+        {
+            if (teleportingPlayers.ContainsKey(player.userID))
+            {
+                teleportingPlayers.Remove(player.userID);
+                player.ChatMessage("<color=red>Телепортация отменена из-за боя</color>");
+            }
         }
 
         private bool CanUseTeleport(ulong playerId, string type)

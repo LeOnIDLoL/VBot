@@ -162,17 +162,21 @@ namespace Oxide.Plugins
             if (config.EnableClanWars)
             {
                 timer.Every(60f, CheckClanWars);
+                timer.Every(60f, ProcessClanUpdates);
+                timer.Every(300f, CheckClanTerritories);
             }
         }
 
         void OnPlayerConnected(BasePlayer player)
         {
             UpdatePlayerOnlineStatus(player.userID, true);
+            CheckPlayerClanStatus(player);
         }
 
         void OnPlayerDisconnected(BasePlayer player, string reason)
         {
             UpdatePlayerOnlineStatus(player.userID, false);
+            SavePlayerClanData(player.userID);
         }
 
         void OnEntityDeath(BaseCombatEntity entity, HitInfo info)
@@ -198,6 +202,25 @@ namespace Oxide.Plugins
                 }
             }
         }
+
+        void OnEntityBuilt(Planner plan, GameObject go)
+        {
+            if (!config.EnableClans) return;
+
+            var player = plan.GetOwnerPlayer();
+            if (player == null) return;
+
+            // Проверяем права на строительство в территории клана
+            CheckBuildingRights(player, go.transform.position);
+        }
+
+        void OnPlayerAttack(BasePlayer attacker, BasePlayer victim)
+        {
+            if (!config.EnableClans) return;
+
+            // Проверяем, не атакуют ли члены одного клана
+            CheckClanFriendlyFire(attacker, victim);
+        }
         #endregion
 
         #region Methods
@@ -206,6 +229,119 @@ namespace Oxide.Plugins
             clans = Interface.Oxide.DataFileSystem.ReadObject<Dictionary<string, Clan>>("clans") ?? new Dictionary<string, Clan>();
             playerClans = Interface.Oxide.DataFileSystem.ReadObject<Dictionary<ulong, string>>("player_clans") ?? new Dictionary<ulong, string>();
             activeWars = Interface.Oxide.DataFileSystem.ReadObject<Dictionary<string, ClanWar>>("clan_wars") ?? new Dictionary<string, ClanWar>();
+        }
+
+        private void SavePlayerClanData(ulong playerId)
+        {
+            if (playerClans.ContainsKey(playerId))
+            {
+                Interface.Oxide.DataFileSystem.WriteObject($"clan_data_{playerId}", playerClans[playerId]);
+            }
+        }
+
+        private void CheckPlayerClanStatus(BasePlayer player)
+        {
+            var clanName = GetPlayerClan(player.userID);
+            if (clanName != null)
+            {
+                var clan = GetClan(clanName);
+                if (clan != null)
+                {
+                    player.ChatMessage($"<color=yellow>Клан: {clan.Name} [{clan.Tag}]</color>");
+                    player.ChatMessage($"<color=white>Участников: {clan.Members.Count}/{config.MaxClanMembers}</color>");
+                }
+            }
+        }
+
+        private void ProcessClanUpdates()
+        {
+            // Обновляем статус кланов
+            foreach (var clan in clans.Values)
+            {
+                UpdateClanLevel(clan);
+            }
+        }
+
+        private void CheckClanTerritories()
+        {
+            // Проверяем территории кланов
+            foreach (var player in BasePlayer.activePlayerList)
+            {
+                var clanName = GetPlayerClan(player.userID);
+                if (clanName != null)
+                {
+                    var clan = GetClan(clanName);
+                    if (clan != null)
+                    {
+                        // Здесь должна быть логика проверки территории
+                    }
+                }
+            }
+        }
+
+        private void CheckBuildingRights(BasePlayer player, Vector3 position)
+        {
+            var clanName = GetPlayerClan(player.userID);
+            if (clanName == null) return;
+
+            var clan = GetClan(clanName);
+            if (clan == null) return;
+
+            // Проверяем, есть ли у игрока права на строительство в этой области
+            if (!HasClanPermission(player.userID, "build"))
+            {
+                player.ChatMessage("<color=red>У вас нет прав на строительство в этой области</color>");
+                return;
+            }
+        }
+
+        private void CheckClanFriendlyFire(BasePlayer attacker, BasePlayer victim)
+        {
+            var attackerClan = GetPlayerClan(attacker.userID);
+            var victimClan = GetPlayerClan(victim.userID);
+
+            if (attackerClan != null && victimClan != null && attackerClan == victimClan)
+            {
+                attacker.ChatMessage("<color=red>Нельзя атаковать членов своего клана!</color>");
+                return;
+            }
+        }
+
+        private void UpdateClanLevel(Clan clan)
+        {
+            var requiredExp = clan.Level * 1000;
+            if (clan.Experience >= requiredExp)
+            {
+                clan.Level++;
+                clan.Experience -= requiredExp;
+                
+                // Уведомляем всех членов клана
+                foreach (var member in clan.Members)
+                {
+                    var player = BasePlayer.FindByID(member.PlayerId);
+                    if (player != null)
+                    {
+                        player.ChatMessage($"<color=green>Клан {clan.Name} достиг уровня {clan.Level}!</color>");
+                    }
+                }
+            }
+        }
+
+        private bool HasClanPermission(ulong playerId, string permission)
+        {
+            var clanName = GetPlayerClan(playerId);
+            if (clanName == null) return false;
+
+            var clan = GetClan(clanName);
+            if (clan == null) return false;
+
+            var member = clan.Members.FirstOrDefault(m => m.PlayerId == playerId);
+            if (member == null) return false;
+
+            var rank = config.DefaultRanks.FirstOrDefault(r => r.Name == member.Rank);
+            if (rank == null) return false;
+
+            return rank.Permissions.Contains(permission);
         }
 
         private void SaveData()

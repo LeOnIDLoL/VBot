@@ -240,6 +240,8 @@ namespace Oxide.Plugins
             if (config.EnableEvents)
             {
                 timer.Every(60f, CheckEvents);
+                timer.Every(300f, ProcessEvents);
+                timer.Every(60f, CheckKitCooldowns);
             }
         }
 
@@ -260,6 +262,32 @@ namespace Oxide.Plugins
         void OnPlayerDisconnected(BasePlayer player, string reason)
         {
             eventParticipants.Remove(player);
+            SavePlayerKitData(player.userID);
+        }
+
+        void OnEntityDeath(BaseCombatEntity entity, HitInfo info)
+        {
+            if (!config.EnableEvents) return;
+
+            var player = entity as BasePlayer;
+            if (player == null) return;
+
+            var killer = info.InitiatorPlayer;
+            if (killer == null || killer == player) return;
+
+            // Проверяем события на убийство
+            CheckKillEvents(killer, player);
+        }
+
+        void OnItemAdded(ItemContainer container, Item item)
+        {
+            if (!config.EnableEvents) return;
+
+            var player = container.playerOwner;
+            if (player == null) return;
+
+            // Проверяем события на получение предметов
+            CheckItemEvents(player, item);
         }
         #endregion
 
@@ -278,6 +306,99 @@ namespace Oxide.Plugins
                     StartEvent(evt);
                     eventLastRun[evt.Name] = currentTime;
                 }
+            }
+        }
+
+        private void ProcessEvents()
+        {
+            var currentTime = Time.time;
+            var eventsToEnd = new List<Event>();
+
+            foreach (var evt in config.Events)
+            {
+                if (evt.IsActive && currentTime - evt.StartTime >= evt.Duration)
+                {
+                    eventsToEnd.Add(evt);
+                }
+            }
+
+            foreach (var evt in eventsToEnd)
+            {
+                EndEvent(evt);
+            }
+        }
+
+        private void CheckKitCooldowns()
+        {
+            var currentTime = Time.time;
+            var playersToRemove = new List<ulong>();
+
+            foreach (var playerId in lastKitUse.Keys.ToList())
+            {
+                if (currentTime - lastKitUse[playerId] >= config.KitCooldown)
+                {
+                    playersToRemove.Add(playerId);
+                }
+            }
+
+            foreach (var playerId in playersToRemove)
+            {
+                lastKitUse.Remove(playerId);
+            }
+        }
+
+        private void CheckPlayerKitStatus(BasePlayer player)
+        {
+            if (!lastKitUse.ContainsKey(player.userID)) return;
+
+            var timeLeft = config.KitCooldown - (Time.time - lastKitUse[player.userID]);
+            if (timeLeft > 0)
+            {
+                player.ChatMessage($"<color=yellow>Кит доступен через {timeLeft:F0} секунд</color>");
+            }
+        }
+
+        private void CheckKillEvents(BasePlayer killer, BasePlayer victim)
+        {
+            // Проверяем события на убийство
+            foreach (var evt in config.Events.Where(e => e.IsActive && e.Type == EventType.PvP))
+            {
+                GiveEventReward(killer, evt);
+            }
+        }
+
+        private void CheckItemEvents(BasePlayer player, Item item)
+        {
+            // Проверяем события на получение предметов
+            foreach (var evt in config.Events.Where(e => e.IsActive && e.Type == EventType.ResourceBoost))
+            {
+                if (item.info.displayName.english.Contains("Metal") || 
+                    item.info.displayName.english.Contains("Stone") || 
+                    item.info.displayName.english.Contains("Wood"))
+                {
+                    GiveEventReward(player, evt);
+                }
+            }
+        }
+
+        private void GiveEventReward(BasePlayer player, Event evt)
+        {
+            foreach (var reward in evt.Rewards)
+            {
+                if (UnityEngine.Random.Range(0f, 100f) <= reward.Chance)
+                {
+                    GiveItemToPlayer(player, reward.ItemId, reward.Amount);
+                    player.ChatMessage($"<color=green>Событие {evt.Name}: получен {reward.ItemName}</color>");
+                }
+            }
+        }
+
+        private void GiveItemToPlayer(BasePlayer player, int itemId, int amount)
+        {
+            var item = ItemManager.CreateByItemID(itemId, amount);
+            if (item != null)
+            {
+                player.GiveItem(item);
             }
         }
 

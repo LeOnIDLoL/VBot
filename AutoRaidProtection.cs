@@ -79,8 +79,23 @@ namespace Oxide.Plugins
         {
             if (config.EnableAutoProtection)
             {
+                timer.Every(1f, CheckRaidProtection);
                 timer.Every(60f, CheckProtectionStatus);
+                timer.Every(300f, CleanupOldData);
             }
+        }
+
+        void OnPlayerConnected(BasePlayer player)
+        {
+            if (config.EnableAutoProtection)
+            {
+                InitializePlayerProtection(player);
+            }
+        }
+
+        void OnPlayerDisconnected(BasePlayer player, string reason)
+        {
+            SavePlayerProtectionData(player.userID);
         }
 
         void OnEntityBuilt(Planner plan, GameObject go)
@@ -98,6 +113,43 @@ namespace Oxide.Plugins
             {
                 CheckRaidAttempt(player, entity.transform.position);
             }
+        }
+
+        object OnEntityTakeDamage(BaseCombatEntity entity, HitInfo info)
+        {
+            if (!config.EnableAutoProtection) return null;
+
+            var player = entity as BasePlayer;
+            if (player == null) return null;
+
+            if (IsPlayerProtected(player))
+            {
+                var attacker = info.InitiatorPlayer;
+                if (attacker != null && attacker != player)
+                {
+                    attacker.ChatMessage($"<color=red>Игрок {player.displayName} защищен от атак</color>");
+                    return false;
+                }
+            }
+
+            return null;
+        }
+
+        void OnExplosiveThrown(BasePlayer player, BaseEntity entity)
+        {
+            if (!config.EnableAutoProtection) return;
+
+            CheckExplosiveProtection(player, entity);
+        }
+
+        void OnEntityAttacked(BaseCombatEntity entity, HitInfo info)
+        {
+            if (!config.EnableAutoProtection) return;
+
+            var player = info.InitiatorPlayer;
+            if (player == null) return;
+
+            CheckRaidAttempt(player, entity.transform.position);
         }
 
         void OnExplosiveThrown(BasePlayer player, BaseEntity entity)

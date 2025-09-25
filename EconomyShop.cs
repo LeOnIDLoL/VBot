@@ -127,6 +127,8 @@ namespace Oxide.Plugins
             if (config.EnableJobs)
             {
                 timer.Every(3600f, PayJobSalaries); // Каждый час
+                timer.Every(300f, ProcessEconomyUpdates);
+                timer.Every(86400f, ProcessDailyRewards); // Каждый день
             }
         }
 
@@ -136,11 +138,37 @@ namespace Oxide.Plugins
             {
                 InitializePlayerEconomy(player);
             }
+            CheckPlayerEconomyStatus(player);
         }
 
         void OnPlayerDisconnected(BasePlayer player, string reason)
         {
             SavePlayerData(player.userID);
+        }
+
+        void OnEntityDeath(BaseCombatEntity entity, HitInfo info)
+        {
+            if (!config.EnableEconomy) return;
+
+            var player = entity as BasePlayer;
+            if (player == null) return;
+
+            var killer = info.InitiatorPlayer;
+            if (killer == null || killer == player) return;
+
+            // Выдаем награду за убийство
+            GiveKillReward(killer, player);
+        }
+
+        void OnItemAdded(ItemContainer container, Item item)
+        {
+            if (!config.EnableEconomy) return;
+
+            var player = container.playerOwner;
+            if (player == null) return;
+
+            // Проверяем, можно ли продать предмет
+            CheckItemForSale(player, item);
         }
         #endregion
 
@@ -149,9 +177,113 @@ namespace Oxide.Plugins
         {
             var economy = new PlayerEconomy
             {
-                Balance = config.StartingBalance
+                Balance = config.StartingBalance,
+                TotalEarned = 0f,
+                TotalSpent = 0f,
+                Transactions = new List<Transaction>()
             };
             playerEconomy[player.userID] = economy;
+            SavePlayerData(player.userID);
+        }
+
+        private void CheckPlayerEconomyStatus(BasePlayer player)
+        {
+            if (!playerEconomy.ContainsKey(player.userID)) return;
+
+            var economy = playerEconomy[player.userID];
+            player.ChatMessage($"<color=yellow>Баланс: {economy.Balance:F0} {config.CurrencySymbol}</color>");
+        }
+
+        private void ProcessEconomyUpdates()
+        {
+            // Обновляем экономику каждые 5 минут
+            foreach (var player in BasePlayer.activePlayerList)
+            {
+                if (playerEconomy.ContainsKey(player.userID))
+                {
+                    var economy = playerEconomy[player.userID];
+                    // Здесь можно добавить логику обновления экономики
+                }
+            }
+        }
+
+        private void ProcessDailyRewards()
+        {
+            var currentTime = Time.time;
+            var cutoffTime = currentTime - 86400f; // 24 часа
+
+            foreach (var player in BasePlayer.activePlayerList)
+            {
+                if (!playerEconomy.ContainsKey(player.userID)) continue;
+
+                var lastReward = lastDailyReward.ContainsKey(player.userID) ? lastDailyReward[player.userID] : 0f;
+                if (currentTime - lastReward >= 86400f)
+                {
+                    GiveDailyReward(player);
+                    lastDailyReward[player.userID] = currentTime;
+                }
+            }
+        }
+
+        private void GiveDailyReward(BasePlayer player)
+        {
+            if (!playerEconomy.ContainsKey(player.userID)) return;
+
+            var economy = playerEconomy[player.userID];
+            economy.Balance += config.DailyReward;
+            economy.TotalEarned += config.DailyReward;
+
+            var transaction = new Transaction
+            {
+                Type = "daily_reward",
+                Amount = config.DailyReward,
+                Description = "Ежедневная награда",
+                Timestamp = Time.time
+            };
+
+            economy.Transactions.Add(transaction);
+            player.ChatMessage($"<color=green>Ежедневная награда: {config.DailyReward:F0} {config.CurrencySymbol}</color>");
+            SavePlayerData(player.userID);
+        }
+
+        private void GiveKillReward(BasePlayer killer, BasePlayer victim)
+        {
+            if (!playerEconomy.ContainsKey(killer.userID)) return;
+
+            var reward = 100f; // Базовая награда за убийство
+            var economy = playerEconomy[killer.userID];
+            economy.Balance += reward;
+            economy.TotalEarned += reward;
+
+            var transaction = new Transaction
+            {
+                Type = "kill_reward",
+                Amount = reward,
+                Description = $"Награда за убийство {victim.displayName}",
+                Timestamp = Time.time
+            };
+
+            economy.Transactions.Add(transaction);
+            killer.ChatMessage($"<color=green>Награда за убийство: {reward:F0} {config.CurrencySymbol}</color>");
+            SavePlayerData(killer.userID);
+        }
+
+        private void CheckItemForSale(BasePlayer player, Item item)
+        {
+            // Проверяем, можно ли продать предмет
+            var sellPrice = GetItemSellPrice(item);
+            if (sellPrice > 0)
+            {
+                player.ChatMessage($"<color=yellow>Предмет {item.info.displayName.english} можно продать за {sellPrice:F0} {config.CurrencySymbol}</color>");
+            }
+        }
+
+        private float GetItemSellPrice(Item item)
+        {
+            // Базовая цена продажи предмета
+            var basePrice = item.info.stackable ? item.amount * 0.1f : 1f;
+            return basePrice;
+        }
             
             player.ChatMessage($"<color=green>Добро пожаловать в экономику BULBARUST!</color>");
             player.ChatMessage($"Ваш стартовый баланс: {config.CurrencySymbol}{config.StartingBalance}");
